@@ -1,12 +1,13 @@
 ﻿using Azure.Core;
+using Backend_ThucTap.DTO.Request.Customer;
+using Backend_ThucTap.DTO.Response.Admin;
+using Backend_ThucTap.DTO.Response.Customer;
+using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
 using Mapster;
-using MyOwnLearning.DTO.Request.Customer;
-using MyOwnLearning.DTO.Response.Admin;
-using MyOwnLearning.DTO.Response.Customer;
-using MyOwnLearning.Interfaces;
 
-namespace MyOwnLearning.Service
+
+namespace Backend_ThucTap.Service
 {
     public interface IUserService
     {

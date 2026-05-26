@@ -1,7 +1,7 @@
 ﻿using Backend_ThucTap.Data;
 using Microsoft.EntityFrameworkCore;
 
-namespace MyOwnLearning.Service
+namespace Backend_ThucTap.Service
 {
     public interface IPermissionService
     {

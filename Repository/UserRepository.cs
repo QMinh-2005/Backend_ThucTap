@@ -1,10 +1,10 @@
 ﻿using Backend_ThucTap.Data;
+using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using MyOwnLearning.Interfaces;
 
-namespace MyOwnLearning.Repositories
+namespace Backend_ThucTap.Repositories
 {
     public class UserRepository : Repository<User>, IUserRepository
     {

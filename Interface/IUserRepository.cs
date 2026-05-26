@@ -1,7 +1,6 @@
 ﻿using Backend_ThucTap.Models;
-using Microsoft.AspNetCore.Mvc;
 
-namespace MyOwnLearning.Interfaces
+namespace Backend_ThucTap.Interfaces
 {
     public interface IUserRepository : IRepository<User>
     {

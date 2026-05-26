@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 
-namespace MyOwnLearning.Service
+namespace Backend_ThucTap.Service
 {
     public interface IAuthService
     {

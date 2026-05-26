@@ -1,4 +1,4 @@
-﻿namespace MyOwnLearning.Interfaces
+﻿namespace Backend_ThucTap.Interfaces
 {
     public interface IRepository<T> where T : class
     {

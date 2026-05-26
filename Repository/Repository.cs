@@ -1,9 +1,8 @@
 ﻿using Backend_ThucTap.Data;
-using Microsoft.AspNetCore.Http.HttpResults;
+using Backend_ThucTap.Interfaces;
 using Microsoft.EntityFrameworkCore;
-using MyOwnLearning.Interfaces;
 
-namespace MyOwnLearning.Repositories
+namespace Backend_ThucTap.Repositories
 {
     public class Repository<T> : IRepository<T> where T : class
     {

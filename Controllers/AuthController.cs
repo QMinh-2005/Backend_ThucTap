@@ -1,9 +1,9 @@
-﻿using Backend_ThucTap.Models;
+﻿using Backend_ThucTap.DTO.Request.Customer;
+using Backend_ThucTap.Models;
+using Backend_ThucTap.Service;
 using Mapster;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using MyOwnLearning.DTO.Request.Customer;
-using MyOwnLearning.Service;
 
 namespace Backend_ThucTap.Controllers
 {

@@ -1,4 +1,4 @@
-﻿namespace MyOwnLearning.DTO.Request.Customer
+﻿namespace Backend_ThucTap.DTO.Request.Customer
 {
     public class ChangeInfoRequest
     {

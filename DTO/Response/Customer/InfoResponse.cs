@@ -1,4 +1,4 @@
-﻿namespace MyOwnLearning.DTO.Response.Customer
+﻿namespace Backend_ThucTap.DTO.Response.Customer
 {
     public class InfoResponse
     {

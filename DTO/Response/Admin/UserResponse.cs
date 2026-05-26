@@ -1,4 +1,4 @@
-﻿namespace MyOwnLearning.DTO.Response.Admin
+﻿namespace Backend_ThucTap.DTO.Response.Admin
 {
     public class UserResponse
     {
