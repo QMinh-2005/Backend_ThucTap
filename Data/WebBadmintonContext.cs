@@ -30,6 +30,8 @@ public partial class WebBadmintonContext : DbContext
 
     public virtual DbSet<ProductImage> ProductImages { get; set; }
 
+    public virtual DbSet<ProductSerial> ProductSerials { get; set; }
+
     public virtual DbSet<Role> Roles { get; set; }
 
     public virtual DbSet<RoleModuleFunction> RoleModuleFunctions { get; set; }
@@ -37,6 +39,10 @@ public partial class WebBadmintonContext : DbContext
     public virtual DbSet<User> Users { get; set; }
 
     public virtual DbSet<UserProfile> UserProfiles { get; set; }
+
+    public virtual DbSet<Voucher> Vouchers { get; set; }
+
+    public virtual DbSet<VoucherCondition> VoucherConditions { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 #warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
@@ -137,6 +143,22 @@ public partial class WebBadmintonContext : DbContext
                 .HasConstraintName("FK__ProductIm__Produ__619B8048");
         });
 
+        modelBuilder.Entity<ProductSerial>(entity =>
+        {
+            entity.HasKey(e => e.SerialId).HasName("PK__ProductS__5E5B3EC40A49B63E");
+
+            entity.Property(e => e.SerialId).HasColumnName("SerialID");
+            entity.Property(e => e.DetailId).HasColumnName("DetailID");
+            entity.Property(e => e.ImportDate).HasColumnType("datetime");
+            entity.Property(e => e.OrderDetailId).HasColumnName("OrderDetailID");
+            entity.Property(e => e.SerialNumber).HasMaxLength(100);
+            entity.Property(e => e.Status).HasMaxLength(50);
+
+            entity.HasOne(d => d.Detail).WithMany(p => p.ProductSerials)
+                .HasForeignKey(d => d.DetailId)
+                .HasConstraintName("FK_ProductSerials_ProductDetails");
+        });
+
         modelBuilder.Entity<Role>(entity =>
         {
             entity.HasKey(e => e.RoleId).HasName("PK__Roles__8AFACE3A555E3E5F");
@@ -220,6 +242,48 @@ public partial class WebBadmintonContext : DbContext
             entity.HasOne(d => d.User).WithMany(p => p.UserProfiles)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("FK_UserProfiles_Users");
+        });
+
+        modelBuilder.Entity<Voucher>(entity =>
+        {
+            entity.HasKey(e => e.VoucherId).HasName("PK__Vouchers__3AEE79C16B90EEE2");
+
+            entity.Property(e => e.VoucherId).HasColumnName("VoucherID");
+            entity.Property(e => e.Description).HasMaxLength(250);
+            entity.Property(e => e.DiscountValue).HasColumnType("decimal(18, 2)");
+            entity.Property(e => e.EndDate).HasColumnType("datetime");
+            entity.Property(e => e.MaxDiscountAmount).HasColumnType("decimal(18, 2)");
+            entity.Property(e => e.MinOrderValue).HasColumnType("decimal(18, 2)");
+            entity.Property(e => e.StartDate).HasColumnType("datetime");
+            entity.Property(e => e.VoucherCode).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<VoucherCondition>(entity =>
+        {
+            entity.HasKey(e => e.ConditionId).HasName("PK__VoucherC__37F5C0EFA7AA7130");
+
+            entity.Property(e => e.ConditionId).HasColumnName("ConditionID");
+            entity.Property(e => e.BrandId).HasColumnName("BrandID");
+            entity.Property(e => e.CategoryId).HasColumnName("CategoryID");
+            entity.Property(e => e.ProductId).HasColumnName("ProductID");
+            entity.Property(e => e.VoucherId).HasColumnName("VoucherID");
+
+            entity.HasOne(d => d.Brand).WithMany(p => p.VoucherConditions)
+                .HasForeignKey(d => d.BrandId)
+                .HasConstraintName("FK_VoucherConditions_Brands");
+
+            entity.HasOne(d => d.Category).WithMany(p => p.VoucherConditions)
+                .HasForeignKey(d => d.CategoryId)
+                .HasConstraintName("FK_VoucherConditions_Categories");
+
+            entity.HasOne(d => d.Product).WithMany(p => p.VoucherConditions)
+                .HasForeignKey(d => d.ProductId)
+                .HasConstraintName("FK_VoucherConditions_Products");
+
+            entity.HasOne(d => d.Voucher).WithMany(p => p.VoucherConditions)
+                .HasForeignKey(d => d.VoucherId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_VoucherConditions_Vouchers");
         });
 
         OnModelCreatingPartial(modelBuilder);
