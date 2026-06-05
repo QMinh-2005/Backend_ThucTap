@@ -1,10 +1,9 @@
 ﻿using Backend_ThucTap.DTO.Request.Customer;
 using Backend_ThucTap.DTO.Response.Admin;
-using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
 using Backend_ThucTap.Service;
 
-namespace Backend_ThucTap.Interface
+namespace Backend_ThucTap.Interfaces
 {
     public interface IOrderRepository : IRepository<Order>
     {

@@ -1,5 +1,5 @@
 ﻿using Backend_ThucTap.Data;
-using Backend_ThucTap.Interface;
+using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
 using Microsoft.EntityFrameworkCore;
 

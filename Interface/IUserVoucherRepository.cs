@@ -1,8 +1,7 @@
 ﻿
-using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
 
-namespace Backend_ThucTap.Interface
+namespace Backend_ThucTap.Interfaces
 {
     public interface IUserVoucherRepository : IRepository<UserVoucher>
     {

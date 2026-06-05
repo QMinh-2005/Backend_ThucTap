@@ -2,13 +2,12 @@
 using Backend_ThucTap.DTO.Request.Customer;
 using Backend_ThucTap.DTO.Response.Admin;
 using Backend_ThucTap.Enums;
-using Backend_ThucTap.Interface;
+using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
-using Backend_ThucTap.Repositories;
 using Backend_ThucTap.Service;
 using Microsoft.EntityFrameworkCore;
 
-namespace Backend_ThucTap.Repository
+namespace Backend_ThucTap.Repositories
 {
     public class OrderRepository : Repository<Order>, IOrderRepository
     {

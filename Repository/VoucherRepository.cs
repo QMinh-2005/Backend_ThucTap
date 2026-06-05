@@ -1,10 +1,9 @@
 ﻿using Backend_ThucTap.Data;
-using Backend_ThucTap.Interface;
+using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
-using Backend_ThucTap.Repositories;
 using Microsoft.EntityFrameworkCore;
 
-namespace Backend_ThucTap.Repository
+namespace Backend_ThucTap.Repositories
 {
     public class VoucherRepository : Repository<Voucher>, IVoucherRepository
     {
