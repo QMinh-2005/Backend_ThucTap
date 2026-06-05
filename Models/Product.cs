@@ -33,5 +33,7 @@ public partial class Product
 
     public virtual ICollection<ProductImage> ProductImages { get; set; } = new List<ProductImage>();
 
+    public virtual ICollection<ProductSpecification> ProductSpecifications { get; set; } = new List<ProductSpecification>();
+
     public virtual ICollection<VoucherCondition> VoucherConditions { get; set; } = new List<VoucherCondition>();
 }

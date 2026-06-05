@@ -1,0 +1,418 @@
+﻿using Backend_ThucTap.Data;
+using Backend_ThucTap.DTO.Request.Customer;
+using Backend_ThucTap.DTO.Response.Admin;
+using Backend_ThucTap.Enums;
+using Backend_ThucTap.Interface;
+using Backend_ThucTap.Models;
+using Backend_ThucTap.Repositories;
+using Backend_ThucTap.Service;
+using Microsoft.EntityFrameworkCore;
+
+namespace Backend_ThucTap.Repository
+{
+    public class OrderRepository : Repository<Order>, IOrderRepository
+    {
+        public OrderRepository(WebBadmintonContext context) : base(context)
+        {
+        }
+        private static IQueryable<OrderSummaryResponse> ProjectOrderSummaries(IQueryable<Order> query)
+        {
+            return query.Select(o => new OrderSummaryResponse
+            {
+                OrderId = o.OrderId,
+                OrderDate = o.OrderDate,
+                ReceiverName = o.ReceiverName,
+                PhoneNumber = o.PhoneNumber,
+                FinalAmount = o.FinalAmount,
+                Status = o.OrderStatus != null ? o.OrderStatus.StatusName : "Chưa xác định",
+                PaymentMethod = o.Payment != null ? o.Payment.PaymentMethod : "Chưa xác định",
+                FirstProductName = o.OrderDetails
+                    .OrderBy(od => od.OrderDetailId)
+                    .Select(od => od.Detail.Product.ProductName)
+                    .FirstOrDefault() ?? "N/A",
+                TotalProducts = o.OrderDetails.Count(),
+                CancelReason = o.CancelReason,
+                CancelledAt = o.CancelledAt,
+                CancelledByUserId = o.CancelledByUserId
+            });
+        }
+        public async Task<List<Order>> GetOrdersByUserIdAsync(int userId)
+        {
+            return await _dbset.Where(o => o.UserId == userId)
+                .Include(o => o.Payment)
+                .Include(o => o.OrderStatus)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.Detail)
+                        .ThenInclude(d => d.Product)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.ProductSerials)
+                // ✅ Include OrderVouchers để trả về thông tin voucher đã áp dụng
+                .Include(o => o.OrderVouchers)
+                    .ThenInclude(ov => ov.Voucher)
+                .AsSplitQuery()
+                .OrderByDescending(o => o.OrderDate)
+                .ToListAsync();
+        }
+
+        public async Task<(List<OrderSummaryResponse> Orders, int TotalCount)> GetAllOrderSummariesAsync(int page, int pageSize)
+        {
+            var query = _dbset.AsNoTracking();
+
+            var totalCount = await query.CountAsync();
+            var orders = await ProjectOrderSummaries(query)
+                .OrderByDescending(o => o.OrderDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (orders, totalCount);
+        }
+        public async Task<(List<OrderSummaryResponse> Orders, int TotalCount)> GetOrderSummariesByStatusIdAsync(int statusId, int page, int pageSize)
+        {
+            if (!Enum.IsDefined(typeof(OrderStatusEnum), statusId))
+                throw new ArgumentException("Trạng thái đơn hàng không hợp lệ.");
+
+            var query = _dbset
+                .AsNoTracking()
+                .Where(o => o.OrderStatusId == statusId);
+
+            var totalCount = await query.CountAsync();
+            var orders = await ProjectOrderSummaries(query)
+                .OrderByDescending(o => o.OrderDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (orders, totalCount);
+        }
+        public async Task<(List<OrderSummaryResponse> Orders, int TotalCount)> SearchOrderSummaryAdminAsync(
+            decimal? minPrice, decimal? maxPrice, DateTime? orderDate, int? statusId, int page, int pageSize)
+        {
+            var query = _dbset.AsNoTracking().AsQueryable();
+
+            if (minPrice.HasValue)
+                query = query.Where(o => o.FinalAmount >= minPrice.Value);
+
+            if (maxPrice.HasValue)
+                query = query.Where(o => o.FinalAmount <= maxPrice.Value);
+
+            if (statusId.HasValue)
+            {
+                if (!Enum.IsDefined(typeof(OrderStatusEnum), statusId))
+                    throw new ArgumentException("Trạng thái đơn hàng không hợp lệ.");
+
+                query = query.Where(o => o.OrderStatusId == statusId.Value);
+            }
+
+            if (orderDate.HasValue)
+            {
+                var startDate = orderDate.Value.Date;
+                var endDate = startDate.AddDays(1);
+                query = query.Where(o => o.OrderDate >= startDate && o.OrderDate < endDate);
+            }
+
+            var totalCount = await query.CountAsync();
+            var orders = await ProjectOrderSummaries(query)
+                .OrderByDescending(o => o.OrderDate)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (orders, totalCount);
+        }
+        private async Task ApplyVoucherUsageAsync(int userId, List<AppliedVoucherDetail> voucherDetails)
+        {
+            if (voucherDetails == null || !voucherDetails.Any())
+                return;
+
+            var voucherIds = voucherDetails.Select(v => v.VoucherId).Distinct().ToList();
+            var vouchers = await _context.Vouchers
+                .Where(v => voucherIds.Contains(v.VoucherId))
+                .ToDictionaryAsync(v => v.VoucherId);
+
+            var userVouchers = await _context.UserVouchers
+                .Where(uv => uv.UserId == userId && voucherIds.Contains(uv.VoucherId))
+                .ToDictionaryAsync(uv => uv.VoucherId);
+
+            foreach (var appliedVoucher in voucherDetails)
+            {
+                if (!vouchers.TryGetValue(appliedVoucher.VoucherId, out var voucher))
+                    throw new Exception($"Voucher ID {appliedVoucher.VoucherId} không tồn tại.");
+
+                if (voucher.UsageLimit.HasValue && voucher.UsedCount >= voucher.UsageLimit.Value)
+                    throw new InvalidOperationException($"Mã {voucher.VoucherCode} đã hết lượt sử dụng.");
+
+                voucher.UsedCount++;
+
+                if (voucher.IsGlobal == true)
+                {
+                    var usedTimes = await _context.OrderVouchers
+                        .CountAsync(ov =>
+                            ov.VoucherId == voucher.VoucherId &&
+                            ov.Order.UserId == userId &&
+                            ov.Order.OrderStatusId != (int)OrderStatusEnum.DaHuy);
+
+                    if (usedTimes >= voucher.MaxUsagePerUser)
+                        throw new InvalidOperationException($"Bạn đã dùng hết lượt cho phép của mã toàn sàn {voucher.VoucherCode}.");
+
+                    continue;
+                }
+
+                if (!userVouchers.TryGetValue(appliedVoucher.VoucherId, out var userVoucher))
+                    throw new InvalidOperationException($"Người dùng chưa sở hữu mã {voucher.VoucherCode} trong ví.");
+
+                if (userVoucher.CurrentUsageCount >= voucher.MaxUsagePerUser)
+                    throw new InvalidOperationException($"Bạn đã dùng hết lượt cho phép của mã {voucher.VoucherCode}.");
+
+                userVoucher.CurrentUsageCount++;
+                userVoucher.UsedDate = DateTime.UtcNow;
+            }
+        }
+        public async Task<Order> CreateOrderAsync(
+            int userId,
+            CreateOrderRequest request,
+            List<AppliedVoucherDetail> voucherDetails)   // ✅ Thêm tham số voucher
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // --- 1. Validate payment method ---
+                var validPaymentMethods = new List<string> { "COD", "Bank Transfer", "E-Wallet" };
+                if (!validPaymentMethods.Contains(request.PaymentMethod))
+                    throw new ArgumentException("Phương thức thanh toán không hợp lệ. Chỉ chấp nhận: COD, Bank Transfer, E-Wallet.");
+
+                // --- 2. Load product details ---
+                var detailsIdRequest = request.OrderDetails.Select(od => od.DetailId).ToList();
+                var details = await _context.ProductDetails
+                    .Include(pd => pd.Product)
+                    .Include(ps => ps.ProductSerials)
+                    .Where(pd => detailsIdRequest.Contains(pd.DetailId))
+                    .ToListAsync();
+
+                // --- 3. Tạo Order ---
+                var order = new Order
+                {
+                    UserId = userId,
+                    ShippingAddress = request.ShippingAddress,
+                    PhoneNumber = request.PhoneNumber,
+                    ReceiverName = request.ReceiverName,
+                    OrderDate = DateTime.UtcNow,
+                    OrderStatusId = (int)OrderStatusEnum.ChoXacNhan,
+                    Payment = new Payment
+                    {
+                        PaymentMethod = request.PaymentMethod,
+                        PaymentDate = DateTime.UtcNow,
+                    }
+                };
+
+                // --- 4. Xử lý từng OrderDetail ---
+                decimal subTotal = 0;
+                foreach (var itemRequest in request.OrderDetails)
+                {
+                    var detail = details.FirstOrDefault(d => d.DetailId == itemRequest.DetailId);
+                    if (detail == null)
+                        throw new Exception($"Không tìm thấy sản phẩm (ID: {itemRequest.DetailId}).");
+
+                    if (itemRequest.Quantity > detail.StockQuantity)
+                        throw new InvalidOperationException($"Sản phẩm {detail.Product?.ProductName} không đủ hàng trong kho.");
+
+                    detail.StockQuantity -= itemRequest.Quantity;
+                    detail.Product.SoldQuantity += itemRequest.Quantity;
+
+                    decimal currentPrice = detail.Price > 0 ? detail.Price : (detail.Product?.DiscountPrice ?? detail.Product.BasePrice);
+
+                    var orderDetail = new OrderDetail
+                    {
+                        DetailId = itemRequest.DetailId,
+                        Quantity = itemRequest.Quantity,
+                        UnitPrice = currentPrice,
+                        IsStringingService = itemRequest.IsStringingService,
+                        StringBrand = itemRequest.StringBrand,
+                        TensionKg = itemRequest.TensionKg
+                    };
+                    order.OrderDetails.Add(orderDetail);
+                    subTotal += currentPrice * itemRequest.Quantity;
+
+                    // Gán Serial
+                    var serialsToUpdate = detail.ProductSerials
+                        .Where(ps => ps.Status == ProductSerialStatus.InStock)
+                        .OrderBy(s => s.ImportDate)
+                        .Take(itemRequest.Quantity)
+                        .ToList();
+
+                    if (serialsToUpdate.Count < itemRequest.Quantity)
+                        throw new InvalidOperationException($"Không đủ mã Serial khả dụng cho {detail.Product?.ProductName}.");
+
+                    foreach (var serial in serialsToUpdate)
+                    {
+                        serial.Status = ProductSerialStatus.Reserved;
+                        orderDetail.ProductSerials.Add(serial);
+                    }
+                }
+
+                // --- 5. Tính phí ship ---
+                decimal shippingFee = subTotal > 500000 ? 30000 : 0;
+
+                // --- 6. Tính Voucher discount ---
+                // ✅ Tổng discount từ tất cả voucher, không vượt quá SubTotal
+                decimal totalDiscount = voucherDetails.Any()
+                    ? Math.Min(voucherDetails.Sum(v => v.DiscountValue), subTotal)
+                    : 0;
+
+                // --- 7. Gán giá trị tiền vào Order ---
+                order.SubTotal = subTotal;
+                order.ShippingFee = shippingFee;
+                order.TotalDiscount = totalDiscount;
+                order.FinalAmount = subTotal + shippingFee - totalDiscount;
+
+                // --- 8. Lưu OrderVoucher cho từng voucher đã dùng ---
+                // ✅ Ghi vào bảng OrderVoucher ngay trong transaction này
+                foreach (var appliedVoucher in voucherDetails)
+                {
+                    order.OrderVouchers.Add(new OrderVoucher
+                    {
+                        VoucherId = appliedVoucher.VoucherId,
+                        AppliedDiscount = appliedVoucher.DiscountValue
+                    });
+                }
+
+                // --- 9. Cập nhật lượt dùng Voucher trong cùng transaction tạo đơn ---
+                await ApplyVoucherUsageAsync(userId, voucherDetails);
+
+                // --- 10. Xóa các CartItem đã đặt hàng ---
+                var cartItemsToRemove = await _context.CartItems
+                    .Where(ci => ci.Cart.UserId == userId && detailsIdRequest.Contains(ci.DetailId))
+                    .ToListAsync();
+
+                if (cartItemsToRemove.Any())
+                    _context.CartItems.RemoveRange(cartItemsToRemove);
+
+                // --- 11. Lưu tất cả ---
+                await _dbset.AddAsync(order);
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                // Load lại OrderStatus để trả về đầy đủ
+                await _context.Entry(order).Reference(o => o.OrderStatus).LoadAsync();
+                return order;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                throw new Exception("Lỗi khi tạo đơn hàng: " + ex.Message);
+            }
+        }
+        public async Task<Order> GetOrderByIdAsync(int orderId)
+        {
+            var order = await _dbset
+                .Where(o => o.OrderId == orderId)
+                .Include(o => o.Payment)
+                .Include(o => o.OrderStatus)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.Detail)
+                        .ThenInclude(d => d.Product)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.ProductSerials)
+                .Include(o => o.OrderVouchers)
+                    .ThenInclude(ov => ov.Voucher)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync();
+
+            if (order == null)
+                throw new Exception("Không tìm thấy đơn hàng.");
+
+            return order;
+        }
+        private async Task RevertOrderAsync(Order order)
+        {
+            foreach (var orderDetail in order.OrderDetails)
+            {
+                var detail = await _context.ProductDetails
+                    .Include(pd => pd.Product)
+                    .Include(ps => ps.ProductSerials)
+                    .FirstOrDefaultAsync(d => d.DetailId == orderDetail.DetailId);
+
+                if (detail != null)
+                {
+                    detail.StockQuantity += orderDetail.Quantity;
+                    detail.Product.SoldQuantity -= orderDetail.Quantity;
+
+                    var serialsToRevert = await _context.ProductSerials
+                        .Where(ps => ps.OrderDetailId == orderDetail.OrderDetailId)
+                        .ToListAsync();
+
+                    foreach (var serial in serialsToRevert)
+                    {
+                        serial.Status = ProductSerialStatus.InStock;
+                        serial.OrderDetailId = null;
+                    }
+                }
+            }
+            await _context.SaveChangesAsync();
+        }
+        public async Task<Order> UpdateStatusOrderAsync(int orderId, int newStatusId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var order = await _dbset
+                    .Include(o => o.Payment)
+                    .Include(o => o.OrderDetails)
+                        .ThenInclude(od => od.Detail)
+                            .ThenInclude(d => d.Product)
+                    .FirstOrDefaultAsync(o => o.OrderId == orderId);
+
+                if (order == null)
+                    throw new Exception("Không tìm thấy đơn hàng.");
+
+                if (!Enum.IsDefined(typeof(OrderStatusEnum), newStatusId))
+                    throw new ArgumentException("Trạng thái đơn hàng không hợp lệ.");
+
+                if (newStatusId == (int)OrderStatusEnum.DaHuy && order.OrderStatusId != (int)OrderStatusEnum.DaHuy)
+                    await RevertOrderAsync(order);
+
+                order.OrderStatusId = newStatusId;
+                _dbset.Update(order);
+                await _context.SaveChangesAsync();
+                await _context.Entry(order).Reference(o => o.OrderStatus).LoadAsync();
+                await transaction.CommitAsync();
+                return order;
+            }
+            catch (Exception ex)
+            {
+                await transaction.RollbackAsync();
+                throw new Exception("Lỗi khi cập nhật trạng thái đơn hàng: " + ex.Message);
+            }
+        }
+        public async Task<Order> GetOrderByIdAndUserIdAsync(int orderId, int userId)
+        {
+            var order = await _dbset
+                .Where(o => o.OrderId == orderId && o.UserId == userId)
+                .Include(o => o.Payment)
+                .Include(o => o.OrderStatus)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.Detail)
+                        .ThenInclude(d => d.Product)
+                .Include(o => o.OrderDetails)
+                    .ThenInclude(od => od.ProductSerials)
+                .Include(o => o.OrderVouchers)
+                    .ThenInclude(ov => ov.Voucher)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync();
+
+            if (order == null)
+                throw new Exception("Không tìm thấy đơn hàng hoặc bạn không có quyền truy cập.");
+
+            return order;
+        }
+        public async Task<int> CountSuccessfulUsesAsync(int userId, int voucherId)
+        {
+            return await _context.OrderVouchers
+                .Where(ov => ov.VoucherId == voucherId
+                             && ov.Order.UserId == userId
+                             && ov.Order.OrderStatusId != (int)OrderStatusEnum.DaHuy) // Không tính đơn đã hủy
+                .CountAsync();
+        }
+
+    }
+}

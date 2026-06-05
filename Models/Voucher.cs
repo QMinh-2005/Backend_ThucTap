@@ -33,5 +33,11 @@ public partial class Voucher
 
     public bool IsActive { get; set; }
 
+    public virtual ICollection<OrderVoucher> OrderVouchers { get; set; } = new List<OrderVoucher>();
+
+    public virtual ICollection<UserVoucher> UserVouchers { get; set; } = new List<UserVoucher>();
+
     public virtual ICollection<VoucherCondition> VoucherConditions { get; set; } = new List<VoucherCondition>();
+
+    public virtual ICollection<VoucherPaymentMethod> VoucherPaymentMethods { get; set; } = new List<VoucherPaymentMethod>();
 }

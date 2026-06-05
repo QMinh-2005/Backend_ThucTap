@@ -18,4 +18,6 @@ public partial class ProductSerial
     public int? OrderDetailId { get; set; }
 
     public virtual ProductDetail Detail { get; set; } = null!;
+
+    public virtual OrderDetail? OrderDetail { get; set; }
 }

@@ -1,12 +1,20 @@
 ﻿using System.Text;
 using Backend_ThucTap.Data;
+using Backend_ThucTap.DTO.Response.Admin;
+using Backend_ThucTap.Interface;
 using Backend_ThucTap.Interfaces;
+using Backend_ThucTap.Models;
 using Backend_ThucTap.Repositories;
+using Backend_ThucTap.Repository;
 using Backend_ThucTap.Service;
+using Mapster;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using MyOwnLearning.Repositories;
+
+var config = TypeAdapterConfig<User, UserResponse>.NewConfig()
+    .Map(dest => dest.Roles, src => src.Roles.Select(r => r.RoleName))
+    .Config;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,7 +38,11 @@ builder.Services.AddScoped<ICartRepository, CartRepository>();
 builder.Services.AddScoped<ICartService, CartService>();
 builder.Services.AddScoped<IProductDetailRepository, ProductDetailRepository>();
 builder.Services.AddScoped<ICartItemRepository, CartItemRepository>();
-
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<IVoucherRepository, VoucherRepository>();
+builder.Services.AddScoped<IUserVoucherRepository, UserVoucherRepository>();
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IVoucherService, VoucherService>();
 
 builder.Services.AddAuthentication(options =>
 {
