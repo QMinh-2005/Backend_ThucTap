@@ -1,8 +1,10 @@
 ﻿using Backend_ThucTap.Data;
-using Backend_ThucTap.Interface;
+using Backend_ThucTap.DTO.Request.Admin;
+using Backend_ThucTap.DTO.Request.Customer;
+using Backend_ThucTap.DTO.Response.Admin;
+using Backend_ThucTap.DTO.Response.Customer;
 using Backend_ThucTap.Interfaces;
 using Backend_ThucTap.Models;
-using Backend_ThucTap.Repository;
 using Microsoft.EntityFrameworkCore;
 
 namespace Backend_ThucTap.Service
@@ -22,6 +24,19 @@ namespace Backend_ThucTap.Service
     public interface IVoucherService
     {
         Task<VoucherValidationResult> ValidateAndCalculateDiscountAsync(int userId, List<int> VoucherIds, List<OrderDetail> orderItems, string paymentMethod);
+        Task<List<VoucherDisplayResponse>> GetAvailableVouchersForUserAsync(int userId, ApplicableVoucherRequest request);
+        Task<List<VoucherResponse>> GetAllVouchersForUserAsync();
+        Task<bool> SaveVoucherAsync(int userId, int voucherId);
+        Task<Voucher> CreateVoucherAsync(VoucherCreateRequest request);
+        Task<(List<VoucherAdminResponse> Vouchers, int TotalCount)> GetVouchersForAdminAsync(
+            string? keyword,
+            bool? isActive,
+            bool? isGlobal,
+            DateTime? fromDate,
+            DateTime? toDate,
+            int page,
+            int pageSize);
+        Task<bool> SetVoucherActiveAsync(int voucherId, bool isActive);
     }
     public class VoucherService : IVoucherService
     {
@@ -29,7 +44,6 @@ namespace Backend_ThucTap.Service
         private readonly IUserVoucherRepository _userVoucherRepository;
         private readonly IProductDetailRepository _productDetailRepository;
         private readonly IOrderRepository _orderRepository;
-        private readonly WebBadmintonContext _context;
         public VoucherService(
             IVoucherRepository voucherRepository,
             IUserVoucherRepository userVoucherRepository,
@@ -41,7 +55,6 @@ namespace Backend_ThucTap.Service
             _userVoucherRepository = userVoucherRepository;
             _productDetailRepository = productDetailRepository;
             _orderRepository = orderRepository;
-            _context = context;
         }
         private bool IsValidPaymentMethodForVoucher(Voucher voucher, string paymentMethod)
         {
@@ -138,6 +151,218 @@ namespace Backend_ThucTap.Service
             }
             result.TotalDiscount = Math.Min(totalOrderDiscount, totalOrderSubTotal);
             return result;
+        }
+        public async Task<List<VoucherDisplayResponse>> GetAvailableVouchersForUserAsync(int userId, ApplicableVoucherRequest request)
+        {
+            request ??= new ApplicableVoucherRequest();
+
+            // Lấy voucher global còn lượt của user và voucher cá nhân user đã lưu trong ví.
+            var vouchers = await _voucherRepository.GetVouchersForDropdownAsync(userId);
+            var result = new List<VoucherDisplayResponse>();
+            var orderItems = request.OrderItems ?? new List<OrderItemRequest>();
+            var hasOrderItems = orderItems.Any();
+
+            var cartItems = new List<(int Quantity, decimal UnitPrice, ProductDetail ProductDetail)>();
+            if (hasOrderItems)
+            {
+                foreach (var item in orderItems)
+                {
+                    var pd = await _productDetailRepository.getProductDetailByIdAsync(item.DetailId);
+                    if (pd != null) cartItems.Add((item.Quantity, item.UnitPrice, pd));
+                }
+            }
+
+            foreach (var v in vouchers)
+            {
+                var dto = new VoucherDisplayResponse
+                {
+                    VoucherId = v.VoucherId,
+                    VoucherCode = v.VoucherCode,
+                    Description = v.Description,
+                    DiscountValue = v.DiscountValue,
+                    IsPercent = v.IsPercent,
+                    MaxDiscountAmount = v.MaxDiscountAmount,
+                    MinOrderValue = v.MinOrderValue ?? 0,
+                    EndDate = v.EndDate,
+                    IsGlobal = v.IsGlobal ?? false,
+                    AllowedPaymentMethods = v.VoucherPaymentMethods?.Select(pm => pm.PaymentMethod).ToList() ?? new List<string>(),
+                    IsEligible = true,
+                    DisabledReason = null
+                };
+
+                if (!string.IsNullOrEmpty(request.PaymentMethod))
+                {
+                    var allowedMethods = dto.AllowedPaymentMethods;
+                    if (allowedMethods.Any() && !allowedMethods.Contains(request.PaymentMethod.Trim(), StringComparer.OrdinalIgnoreCase))
+                    {
+                        dto.IsEligible = false;
+                        dto.DisabledReason = $"Mã này chỉ áp dụng cho phương thức: {string.Join(", ", allowedMethods)}";
+                        result.Add(dto);
+                        continue;
+                    }
+                }
+
+                // Nếu FE chỉ mở màn "Voucher của tôi" và chưa gửi sản phẩm trong đơn,
+                // API chỉ đánh giá theo thời hạn, lượt dùng và phương thức thanh toán.
+                if (!hasOrderItems)
+                {
+                    result.Add(dto);
+                    continue;
+                }
+
+                decimal eligibleSubTotal = 0;
+                if (v.IsGlobal == true || v.VoucherConditions == null || !v.VoucherConditions.Any())
+                {
+                    eligibleSubTotal = cartItems.Sum(x => x.Quantity * x.UnitPrice);
+                }
+                else
+                {
+                    var eligibleItems = cartItems.Where(x => v.VoucherConditions.Any(c =>
+                        (c.ProductId == null || c.ProductId == x.ProductDetail.ProductId) &&
+                        (c.CategoryId == null || c.CategoryId == x.ProductDetail.Product.CategoryId) &&
+                        (c.BrandId == null || c.BrandId == x.ProductDetail.Product.BrandId)
+                    )).ToList();
+
+                    if (!eligibleItems.Any())
+                    {
+                        dto.IsEligible = false;
+                        dto.DisabledReason = "Mã không áp dụng cho bất kỳ sản phẩm nào trong đơn hàng này.";
+                        result.Add(dto);
+                        continue;
+                    }
+
+                    eligibleSubTotal = eligibleItems.Sum(x => x.Quantity * x.UnitPrice);
+                }
+
+                if (v.MinOrderValue.HasValue && eligibleSubTotal < v.MinOrderValue.Value)
+                {
+                    dto.IsEligible = false;
+                    decimal missingAmount = v.MinOrderValue.Value - eligibleSubTotal;
+                    dto.DisabledReason = $"Đơn hàng chưa đạt giá trị tối thiểu. Cần mua thêm {missingAmount:N0}đ các sản phẩm phù hợp.";
+                }
+
+                result.Add(dto);
+            }
+
+            return result
+                .OrderByDescending(x => x.IsEligible)
+                .ThenBy(x => x.EndDate)
+                .ToList();
+        }
+        public async Task<List<VoucherResponse>> GetAllVouchersForUserAsync()
+        {
+            var voucher = await _voucherRepository.GetAllAvailableVouchersAsync();
+            return voucher.Select(v => new VoucherResponse
+            {
+                VoucherId = v.VoucherId,
+                VoucherCode = v.VoucherCode,
+                Description = v.Description,
+                DiscountValue = v.DiscountValue,
+                IsPercent = v.IsPercent,
+                MaxDiscountAmount = v.MaxDiscountAmount,
+                MinOrderValue = v.MinOrderValue ?? 0,
+                StartDate = v.StartDate,
+                EndDate = v.EndDate,
+                MaxUsagePerUser = v.MaxUsagePerUser,
+                IsGlobal = v.IsGlobal ?? false,
+                AllowedPaymentMethods = v.VoucherPaymentMethods != null
+                          ? v.VoucherPaymentMethods.Select(pm => pm.PaymentMethod).ToList()
+                          : new List<string>()
+            }).ToList();
+        }
+        public async Task<bool> SaveVoucherAsync(int userId, int voucherId)
+        {
+            var voucher = await _voucherRepository.GetVoucherByIdAsync(voucherId);
+            if (voucher == null) throw new Exception("Voucher không tồn tại.");
+
+            // Thường mã Global (toàn hệ thống) không cần lưu vào ví cá nhân
+            if (voucher.IsGlobal == true) throw new Exception("Đây là mã dùng chung, không cần lưu.");
+
+            var isSaved = await _userVoucherRepository.IsVoucherAlreadySavedAsync(userId, voucherId);
+            if (isSaved) throw new Exception("Bạn đã lưu voucher này rồi.");
+
+            var userVoucher = new UserVoucher
+            {
+                UserId = userId,
+                VoucherId = voucherId,
+                CurrentUsageCount = 0,
+                UsedDate = null,
+                SavedDate = DateTime.Now
+            };
+
+            await _userVoucherRepository.AddAsync(userVoucher);
+            await _voucherRepository.SaveChangesAsync();
+            return true;
+        }
+        public async Task<Voucher> CreateVoucherAsync(VoucherCreateRequest request)
+        {
+            var voucher = new Voucher
+            {
+                VoucherCode = request.VoucherCode,
+                Description = request.Description,
+                DiscountValue = request.DiscountValue,
+                IsPercent = request.IsPercent,
+                MaxDiscountAmount = request.MaxDiscountAmount,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                MinOrderValue = request.MinOrderValue,
+                IsGlobal = request.IsGlobal,
+                MaxUsagePerUser = request.MaxUsagePerUser,
+                UsageLimit = request.UsageLimit,
+                UsedCount = 0,
+                IsActive = true,
+            };
+
+            if (request.Conditions != null)
+            {
+                voucher.VoucherConditions = request.Conditions.Select(c => new VoucherCondition
+                {
+                    ProductId = c.ProductId,
+                    CategoryId = c.CategoryId,
+                    BrandId = c.BrandId
+                }).ToList();
+            }
+            if (request.AllowedPaymentMethods != null)
+            {
+                voucher.VoucherPaymentMethods = request.AllowedPaymentMethods.Select(pm => new VoucherPaymentMethod
+                {
+                    PaymentMethod = pm
+                }).ToList();
+            }
+            await _voucherRepository.AddAsync(voucher);
+            await _voucherRepository.SaveChangesAsync();
+            return voucher;
+        }
+        public async Task<(List<VoucherAdminResponse> Vouchers, int TotalCount)> GetVouchersForAdminAsync(
+            string? keyword,
+            bool? isActive,
+            bool? isGlobal,
+            DateTime? fromDate,
+            DateTime? toDate,
+            int page,
+            int pageSize)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 10;
+            if (pageSize > 100) pageSize = 100;
+
+            if (fromDate.HasValue && toDate.HasValue && fromDate.Value.Date > toDate.Value.Date)
+            {
+                throw new Exception("Ngày bắt đầu không được lớn hơn ngày kết thúc.");
+            }
+
+            return await _voucherRepository.GetVouchersForAdminAsync(
+                keyword,
+                isActive,
+                isGlobal,
+                fromDate,
+                toDate,
+                page,
+                pageSize);
+        }
+        public async Task<bool> SetVoucherActiveAsync(int voucherId, bool isActive)
+        {
+            return await _voucherRepository.SetVoucherActiveAsync(voucherId, isActive);
         }
         private VoucherValidationResult Error(string message) => new() { IsValid = false, ErrorMessage = message };
     }
