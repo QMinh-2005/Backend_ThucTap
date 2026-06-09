@@ -12,5 +12,6 @@
         Task AddRangeAsync(IEnumerable<T> entities);
         Task SaveChangesAsync();
 
+        Task UpdateRangeAsync(IEnumerable<T> entities);
     }
 }

@@ -53,6 +53,14 @@ namespace Backend_ThucTap.Repositories
         {
             await _context.SaveChangesAsync();
         }
-
+        public virtual async Task UpdateRangeAsync(IEnumerable<T> entities)
+        {
+            if (entities == null || !entities.Any())
+            {
+                return;
+            }
+            _dbset.UpdateRange(entities);
+            await _context.SaveChangesAsync();
+        }
     }
 }

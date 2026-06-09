@@ -19,5 +19,12 @@ namespace Backend_ThucTap.Repositories
                 .Include(s => s.ProductSerials)
                 .FirstOrDefaultAsync(s => s.DetailId == detailId);
         }
+        public async Task<ProductDetail> getProductDetailWithSerialNumberAsync(int detailId)
+        {
+            return await _dbset
+                .Include(s => s.ProductSerials)
+                .FirstOrDefaultAsync(s => s.DetailId == detailId);
+        }
+
     }
 }
